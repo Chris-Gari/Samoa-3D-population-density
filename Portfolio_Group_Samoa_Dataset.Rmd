@@ -1,0 +1,48 @@
+---
+title: "Portfolio_Group_SamoaPop_DataViz"
+author: "Chris Gari"
+date: "2024-03-12"
+output: word_document
+---
+
+### Install packages if needed.
+
+```         
+install.packages("sf", dependencies=TRUE)
+install.packages("tmap", dependencies=TRUE)
+install.packages("mapview", dependencies=TRUE)
+install.packages("stars", dependencies=TRUE)
+install.packages("rayshader", dependencies=TRUE)
+install.packages("MetBrewer", dependencies=TRUE)
+install.packages("rayrender")
+install.packages("extrafont", dependencies=TRUE)
+install.packages("magick", dependencies=TRUE)
+```
+
+### Load packages
+
+```         
+options(rgl.useNULL = FALSE)
+require(tidyverse)
+require(sf)
+require(tmap)
+require(ggplot2)
+require(mapview)
+require(stars)
+require(rayshader)
+require(MetBrewer)
+require(colorspace)
+require(rayrender)
+require(magick)
+require(extrafont)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
