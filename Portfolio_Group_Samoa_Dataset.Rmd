@@ -7,7 +7,7 @@ output: word_document
 
 ### Install packages if needed.
 
-```         
+``` r
 install.packages("sf", dependencies=TRUE)
 install.packages("tmap", dependencies=TRUE)
 install.packages("mapview", dependencies=TRUE)
@@ -17,11 +17,12 @@ install.packages("MetBrewer", dependencies=TRUE)
 install.packages("rayrender")
 install.packages("extrafont", dependencies=TRUE)
 install.packages("magick", dependencies=TRUE)
+install.packages("tigris", dependencies=TRUE)
 ```
 
 ### Load packages
 
-```         
+```{r}
 options(rgl.useNULL = FALSE)
 require(tidyverse)
 require(sf)
@@ -35,14 +36,69 @@ require(colorspace)
 require(rayrender)
 require(magick)
 require(extrafont)
+require(tigris)
 ```
 
 ## Including Plots
 
 You can also embed plots, for example:
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+data <- st_read("data/kontur_population_WS_20231101.gpkg")
+```
+
+```{r}
+data %>%  
+  ggplot() +
+  geom_sf()
+  
+```
+
+```{r}
+bb <- st_bbox(data)
+
+bottom_left <- st_point(c(bb[["xmin"]], bb[["ymin"]])) %>% 
+  st_sfc(crs = st_crs(data))
+bottom_right <- st_point(c(bb[["xmax"]], bb[["ymin"]])) %>% 
+  st_sfc(crs = st_crs(data))
+top_left <- st_point(c(bb[["xmin"]], bb[["ymax"]])) %>% 
+  st_sfc(crs = st_crs(data))
+top_right <- st_point(c(bb[["xmax"]], bb[["ymax"]])) %>% 
+  st_sfc(crs = st_crs(data))
+```
+
+```{r}
+data %>% 
+  ggplot() +
+  geom_sf() +
+  geom_sf(data = bottom_left) +
+  geom_sf(data = bottom_right, color = "red")
+```
+
+```{r}
+width <- st_distance(bottom_left, bottom_right)
+height <- st_distance(bottom_left, top_left)
+```
+
+```{r}
+if (width > height) {
+  w_ratio <- 1
+  h_ratio <- height / width
+} else {
+  h_ratio <- 1
+  w_ratio <- width / height
+}
+```
+
+```{r}
+size <- 3148
+data_rast <- st_rasterize(data,
+                          nx = floor(size * w_ratio) %>% as.numeric(),
+                          ny = floor(size * h_ratio)) %>% as.numeric()
+
+pop_matrix <- matrix(data$population,
+                     nrow = floor(size * w_ratio),
+                     ncol = floor(size * h_ratio))
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
