@@ -1,0 +1,338 @@
+---
+title: "Samoa Density Population"
+output: word_document
+date: "2024-03-31"
+---
+
+# Packages
+
+### install.packages()
+
+Install as needed by copy and pasting this code block into the console, if I missed some you can add them manually in the console.
+
+```         
+install.packages("sf", dependencies=TRUE)
+install.packages("tmap", dependencies=TRUE)
+install.packages("mapview", dependencies=TRUE)
+install.packages("stars", dependencies=TRUE)
+install.packages("rayshader", dependencies=TRUE)
+install.packages("MetBrewer", dependencies=TRUE)
+install.packages("rayrender")
+install.packages("extrafont", dependencies=TRUE)
+install.packages("magick", dependencies=TRUE)
+install.packages("tigris", dependencies=TRUE)
+install.packages("ambient", dependencies = TRUE)
+install.packages("ggplot2")
+```
+
+### Load packages
+
+Load packages as needed, if I missed some you can do them manually in the console.
+
+It might be bloated and you can remove some unnecessary libraries but that will take time to know for sure so load them all in for now.
+
+```{r, echo = FALSE}
+library(sf)
+library(tigris)
+library(tidyverse)
+library(stars)
+library(rayshader)
+library(rayrender)
+library(MetBrewer)
+library(colorspace)
+library(magick)
+library(extrafont)
+library(mapview)
+library(tmap)
+library(ambient)
+library(ggplot2)
+```
+
+# Downloading the Data
+
+Downloads the files, and places them in the working directory (*setwd("path")*) on your machine. (974 KiB)
+
+There will be multiple outputs here: 2D plot, a physical representation of Samoa Islands, and a 3D Population Density plot.
+
+```{r, echo=FALSE}
+download_zip <- tempfile()
+download.file("https://git.gari-homelab.party/CA_Irag/Samoa-Density-Population/raw/branch/main/ZIP%20files%20for%20download/data-samoa.zip", download_zip)
+
+samoa_data <- st_read(unzip(download_zip, "kontur_population_WS_20220630.gpkg"))
+samoa_bounds <- st_read(unzip(download_zip, "kontur_boundaries_WS_20230628.gpkg"))
+samoa_admin <- st_read(unzip(download_zip, "kontur_population_WS_20231101.gpkg"))
+samoa_tif = raster::raster(unzip(download_zip, "Samoa-Elevation-Map-768x358.tif")) 
+
+unlink(download_zip)
+```
+
+# 2D Plot
+
+**Filtering for geom values and ensuring accuracy**
+
+```{r}
+samoa_2dbounds <- samoa_admin %>%
+  st_geometry %>%
+  st_union %>%
+  st_sf %>%
+  st_make_valid()
+
+```
+
+**Plotting the 2D data**
+
+```{r}
+
+
+ggplot(samoa_admin) + 
+  geom_sf(aes(fill = population), color = "gray66", linewidth = 1) + 
+  geom_sf(data = samoa_2dbounds, fill = NA) +
+  theme(panel.background = element_rect(fill = "white", colour = "white", size = 0, linetype = "solid"),
+        panel.grid.major = element_line(size = 0, colour = "white"))
+
+```
+
+**Save as desired.**
+
+```{r}
+ggsave("images/test.tiff", width=8.1, height=4, dpi=300)
+```
+
+# 3D Physical representation of Samoa islands
+
+**Converting our raster to a matrix**
+
+```{r}
+samoa_map_matrix = raster_to_matrix(samoa_tif)
+```
+
+```{r}
+samoa_map_matrix %>%
+  sphere_shade(texture = "imhof1") %>%
+  add_water(detect_water(samoa_map_matrix,  min_area = 10000), color = "mintcream") %>%
+  add_shadow(ray_shade(samoa_map_matrix, zscale = 5), 0.5) %>%
+  add_shadow(ambient_shade(samoa_map_matrix), 0) %>%
+  plot_3d(samoa_map_matrix,
+          baseshape = "rectangle",
+          solid = TRUE,
+          zscale = 9, 
+          fov = 0, 
+          theta = -55, 
+          zoom = 0.8, 
+          phi = 90, 
+          windowsize = c(1200, 1200),
+          background = "white")
+
+```
+
+**Changing our camera/view angles as well as render a snapshot**
+
+```{r}
+render_camera(theta = -55, 
+              phi = 90 / 2, 
+              zoom = .8,
+              fov = 0,
+              shift_vertical = 0)
+```
+
+**Sava as desired.**
+
+```{r}
+render_snapshot()
+```
+
+# 3D Population Density data visualization
+
+**Filtering for Samoa data for our boundaries**
+
+```{r}
+
+samoa <- samoa_bounds |> 
+  filter(name_en == "Samoa") |> 
+  st_transform(crs = st_crs(samoa_data))
+```
+
+**Check the data**
+
+```{r}
+samoa |> 
+  ggplot() +
+  geom_sf()
+```
+
+**Finding the intersection on st_samoa to limit Samoa only**
+
+```{r}
+st_samoa <- st_intersection(samoa_data, samoa)
+```
+
+**Define the aspect ratio based on bounding box**
+
+```{r}
+bb <- st_bbox(st_samoa)
+
+bottom_left <- st_point(c(bb[["xmin"]], bb[["ymin"]])) |> 
+  st_sfc(crs = st_crs(samoa_data))
+
+bottom_right <- st_point(c(bb[["xmax"]], bb[["ymin"]])) |> 
+  st_sfc(crs = st_crs(samoa_data))
+```
+
+**Check by plotting points**
+
+```{r}
+samoa |> 
+  ggplot() +
+  geom_sf() +
+  geom_sf(data = bottom_left) +
+  geom_sf(data = bottom_right, color = "red")
+
+width <- st_distance(bottom_left, bottom_right)
+
+top_left <- st_point(c(bb[["xmin"]], bb[["ymax"]])) |> 
+  st_sfc(crs = st_crs(samoa_data))
+
+height <- st_distance(bottom_left, top_left)
+```
+
+**Handle conditions of width or height being the longer side**
+
+```{r}
+if (width > height) {
+  w_ratio <- 1
+  h_ratio <- height / width
+} else {
+  h_ratio <- 1
+  w_ratio <- width / height
+}
+```
+
+**Convert to raster so we can then convert to matrix**
+
+Important note: nx must be equal to the widest ratio
+
+```{r}
+size <- 3000
+
+samoa_rast <- st_rasterize(st_samoa, 
+                             nx = floor(size * w_ratio),
+                             ny = floor(size * h_ratio))
+
+mat <- matrix(samoa_rast$population, 
+              nrow = floor(size * w_ratio),
+              ncol = floor(size * h_ratio))
+```
+
+## Artist's 3D rendition
+
+At this point our plot is ready for visualization and is now up to the creativity of the user but limited to the knowledge he/she has on utilizing the available settings. Change values as desired.
+
+Creating our color palette Reference palette chart: <https://github.com/BlakeRMills/MetBrewer/blob/main/PaletteImages/Examples/AllPalettes.png>
+
+```{r}
+c1 <- met.brewer(name = "Hokusai3", n = 60, direction = c(-1))
+swatchplot(c1)
+
+texture <- grDevices::colorRampPalette(c1, bias = 2)(256)
+swatchplot(texture)
+```
+
+**3D plot visualization for Population Density**
+
+```{r, echo = FALSE}
+rgl::close3d()
+
+
+mat |> 
+  height_shade(texture = texture) |>
+  plot_3d(heightmap = mat,
+          phi = 45,
+          zscale = 100 / 10,
+          #solid = TRUE,
+          soliddepth = 0,
+          shadowdepth = 0,
+          soil = TRUE,
+          soil_levels = length(c1),
+          soil_color_light = c1[40],
+          soil_color_dark = c1[1],
+          soil_gradient = 4,
+          soil_gradient_darken = 0.6,
+         # shadow = TRUE,
+          #water = TRUE,
+          #soil = FALSE,
+          #background = "white",
+          windowsize = c(600, 600),
+          #asp = 1
+         )
+
+```
+
+Changing our camera/view angles
+
+```{r}
+render_camera(theta = -55, 
+              phi = 45, 
+              zoom = .8,
+              fov = 0,
+              shift_vertical = 0)
+```
+
+**High Quality Render.**
+
+Edit the file directory for image output as need (outfile).
+
+Important note: For final render remove the divisions for samples, width, and height.
+
+```{r}
+
+outfile <- "images/final_plot.png" 
+start_time <- Sys.time()
+cat(crayon::cyan(start_time), "\n")
+if (!file.exists(outfile)) {
+  png::writePNG(matrix(1), target = outfile)
+}
+render_highquality(
+  filename = outfile,
+  interactive = FALSE,
+  lightdirection = 80,
+  lightaltitude = c(20, 80),
+  lightcolor = c(c1[27], "skyblue"),
+  lightintensity = c(600, 100),
+  # lightaltitude = 20,
+  # lightcolor = "skyblue",
+  # lightintensity = 600,
+  lightsize = NULL,
+  samples = 450,
+  width = 3508,
+  height = 2480,
+  #cache_scene = TRUE
+)
+end_time <- Sys.time()
+diff <- end_time - start_time
+cat(crayon::cyan(diff), "\n")
+
+```
+
+# Analysis Report
+
+A report on how we finished this project. Our members include Chris Andrei Irag, Hernel Juanico, John Vincent Gamali, and Eumir Maling.
+
+### Learning the capabilities of R
+
+We had trouble analyzing the functions of R scripts such as the one given to us as an example by Sir Albert. Upon running the script given by Sir Albert, we had to learn how to import the data, setting up the data to make them into a matrix. We were stuck on how to properly change our raster data to a matrix for a long time.
+
+The solution was simple. we just had to switch the ratio of our data dimensions whether which one was wider. We discovered it when one of our members took on another angle by using a different but similar script compared to Sir Albert's. After that we had our first proper 3D render, even if it looked ugly, we were able to replicate our outputs by using different datasets by applying what we had learned.
+
+(Other problems not mentioned are trivial and were easy to solve through research and study, and is thus considered unremarkable)
+
+### Learning what R and Data Science demands
+
+Upon doing multiple renders, it becomes clear, R requires a lot of resources. This includes a decent amount of RAM, a decent graphics processing device (iGPU/dGPU) that are able to utilize the graphics API that R demands, as well as other small details.
+
+Aware of this, our team knows how to optimize our workflow, by skipping on high demanding render settings (i.e image Resolution, the scaling of data size, etc) using quick and low demanding settings to configure our final output. For which then, we maximize the quality by upping our render settings.
+
+### Cultivating creativity
+
+We have everything ready for customization, we settled on the colors, and the angles. Some other settings we had some difficulties trying to implement or understand, we did our best considering with our skill issues on fully utilizing R to form the concept of our final output. Alas, we did what we could to get the closest representation of our concept.
+
+Using various inspirations and resources from the internet that takes advantages of effective data visualization (e.g. Behance, Pinterest, Dribble), we had come up with a design that is not simply visually appealing but also effective in relaying its message across different user groups. Alongside with post-processing effects done in R, we also used other tools to improve visualization with Figma (A UX and graphic design software) to add extra annotations for the data giving it further context. By implementing good design practices and principles while maintaining integrity of the data, we had harnessed creativity in designing our visualization that helps users not just to create attention but to inform about the data.
